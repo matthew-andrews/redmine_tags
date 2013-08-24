@@ -50,6 +50,28 @@ module RedmineTags
           )
         SQL
 
+        TAGGING_IDS_LIMIT_SQL_FOR_ALL_PROJECTS = <<-SQL
+          tag_id IN (
+            SELECT #{ActsAsTaggableOn::Tagging.table_name}.tag_id
+              FROM #{ActsAsTaggableOn::Tagging.table_name}
+             WHERE #{ActsAsTaggableOn::Tagging.table_name}.taggable_id IN (
+               SELECT `issues`.`id` FROM `issues` LEFT OUTER JOIN `projects` ON `projects`.`id` = `issues`.`project_id`
+                WHERE (projects.status <> 9 AND projects.id IN (SELECT em.project_id FROM enabled_modules em WHERE em.name='issue_tracking'))
+             ) AND #{ActsAsTaggableOn::Tagging.table_name}.taggable_type = 'Issue'
+          )
+        SQL
+
+        TAGGING_IDS_LIMIT_SQL_FOR_PROJECT = <<-SQL
+          tag_id IN (
+            SELECT #{ActsAsTaggableOn::Tagging.table_name}.tag_id
+              FROM #{ActsAsTaggableOn::Tagging.table_name}
+             WHERE #{ActsAsTaggableOn::Tagging.table_name}.taggable_id IN (
+               SELECT `issues`.`id` FROM `issues` LEFT OUTER JOIN `projects` ON `projects`.`id` = `issues`.`project_id`
+                WHERE (projects.status <> 9 AND projects.id = ?)
+             ) AND #{ActsAsTaggableOn::Tagging.table_name}.taggable_type = 'Issue'
+          )
+        SQL
+
         # Returns available issue tags
         # === Parameters
         # * <i>options</i> = (optional) Options hash of
@@ -57,11 +79,11 @@ module RedmineTags
         #   * open_only - Boolean. Whenever search within open issues only.
         #   * name_like - String. Substring to filter found tags.
         def available_tags(options = {})
-          ids_scope = Issue.visible
-          ids_scope = ids_scope.on_project(options[:project]) if options[:project]
-          ids_scope = ids_scope.open if options[:open_only]
-
           conditions = [""]
+
+          conditions[0] = options[:project] ? TAGGING_IDS_LIMIT_SQL_FOR_ALL_PROJECTS : TAGGING_IDS_LIMIT_SQL_FOR_PROJECT
+
+          conditions << options[:project] if options[:project]
 
           # limit to the tags matching given %name_like%
           if options[:name_like]
@@ -69,9 +91,7 @@ module RedmineTags
             conditions << "%#{options[:name_like].downcase}%"
           end
 
-          conditions[0] << TAGGING_IDS_LIMIT_SQL
-          conditions << ids_scope.map{ |issue| issue.id }.push(-1)
-
+          # conditions << ids_scope.map{ |issue| issue.id }.push(-1)
           self.all_tag_counts(:conditions => conditions)
         end
       end
